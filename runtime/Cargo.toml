@@ -10,6 +10,8 @@ license = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+rust-crypto = "^0.2"
+hex = "^0.4"
 aquamarine = { workspace = true }
 arrayref = { workspace = true }
 base64 = { workspace = true }
