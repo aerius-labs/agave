@@ -550,14 +550,17 @@ fn simple_transfer() -> Vec<SvmTestEntry> {
 #[test_case(simple_transfer())]
 fn svm_integration(test_entries: Vec<SvmTestEntry>) {
     for test_entry in test_entries {
+        println!("test entry: {:?}", test_entry);
         execute_test_entry(test_entry);
     }
 }
 
 fn execute_test_entry(test_entry: SvmTestEntry) {
     let mock_bank = MockBankCallback::default();
+    println!("Mock Bank: {:?}", mock_bank);
 
     for (name, slot) in &test_entry.initial_programs {
+        println!("programs: {}", name.to_string());
         deploy_program(name.to_string(), *slot, &mock_bank);
     }
 

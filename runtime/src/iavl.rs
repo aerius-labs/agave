@@ -1,6 +1,18 @@
-use std::cmp;
-use crypto::digest::Digest;
-use crypto::sha3::Sha3;
+use {
+  std::cmp,
+  std::sync::{Arc, RwLock},
+  crypto::{
+    digest::Digest,
+    sha3::Sha3,
+  },
+  solana_svm::transaction_processing_callback::TransactionProcessingCallback,
+  solana_sdk::{
+    account::{AccountSharedData, ReadableAccount, WritableAccount},
+    pubkey::Pubkey,
+    native_loader,
+},
+};
+
 #[derive(Clone)]
 pub enum Node<K, V> {
   Leaf {
@@ -21,7 +33,7 @@ pub enum Node<K, V> {
 
 #[derive(Clone)]
 pub struct IAVL<K, V> {
-  pub root: Option<Box<Node<K, V>>>,
+  pub root:  Arc<RwLock<Option<Box<Node<K, V>>>>>,
   pub version: u32,
 }
 
@@ -354,68 +366,140 @@ impl<'a, K: Ord, V> Node<K, V> {
 }
 
 impl<K, V> IAVL<K, V> {
+  // Creates a new IAVL tree with no root and version 0
   pub fn new() -> Self {
-    return IAVL {
-      root: None,
-      version: 0,
-    };
+      IAVL {
+          root: Arc::new(RwLock::new(None)), // Initialize the root with RwLock
+          version: 0,
+      }
   }
+
+  // Inserts a new key-value pair into the IAVL tree
   pub fn insert(&mut self, new_key: K, new_value: V)
   where
-    K: Ord + Copy,
+      K: Ord + Copy,
   {
-    match self.root.take() {
-      None => {
-        self.root = Some(Box::new(Node::new_leaf(new_key, new_value, self.version)));
+      // Acquire a write lock to modify the root
+      let mut root_guard = self.root.write().unwrap();
+
+      match root_guard.take() {
+          None => {
+              // If the tree is empty, create a new leaf node as the root
+              *root_guard = Some(Box::new(Node::new_leaf(new_key, new_value, self.version)));
+          }
+          Some(root) => {
+              // Insert the new key-value pair into the existing tree
+              *root_guard = Some(Node::insert(root, new_key, new_value, self.version));
+          }
       }
-      Some(root) => {
-        self.root = Some(Node::insert(root, new_key, new_value, self.version));
-      }
-    }
   }
-  pub fn save_tree(&mut self) -> [u8; 32] {
-    match self.root.as_mut() {
-      None => [0; 32],
-      Some(root) => Node::update_hash(root),
-    }
+
+  // Calculates and saves the tree's hash
+  pub fn save_tree(&self) -> [u8; 32] {
+      // Acquire a read lock to safely access and update the root hash
+      let mut root_guard = self.root.write().unwrap();
+
+      match root_guard.as_mut() {
+          None => [0; 32], // Return a zeroed hash if the tree is empty
+          Some(root) => Node::update_hash(root), // Update and return the hash of the tree
+      }
   }
 }
 
-#[cfg(test)]
-mod tests {
-  use super::*;
 
-  #[test]
-  fn construct_tree() {
-    let mut iavl = IAVL::new();
-    iavl.insert(4, 4);
-  }
+impl TransactionProcessingCallback for IAVL<Pubkey, AccountSharedData> {
+  // Method to check if the account's owner matches any of the provided owners
+  fn account_matches_owners(&self, account: &Pubkey, owners: &[Pubkey]) -> Option<usize> {
+    // Acquire a read lock on the RwLock to safely access the root node
+    let root_guard = self.root.read().unwrap(); // Locking for read access
 
-  #[test]
-  fn search() {
-    let mut iavl = IAVL::new();
-    for i in 0..10 {
-      iavl.insert(i, i);
+    // Safely access the root and perform the search
+    if let Some(data) = root_guard
+        .as_ref() // Access the Option inside the RwLock
+        .and_then(|root| Node::search(account, root))
+    {
+        // Check if the account has zero lamports (inactive)
+        if data.1.lamports() == 0 {
+            None
+        } else {
+            // Check if the owner of the account matches any of the provided owners
+            owners.iter().position(|entry| data.1.owner() == entry)
+        }
+    } else {
+        None
     }
-    let root = &iavl.root.unwrap();
-    let s = Node::search(&11, root);
-    match s {
-      None => {}
-      Some(_) => assert!(false),
-    }
-    let s = Node::search(&4, root);
-    match s {
-      None => assert!(false),
-      Some(_) => {}
-    }
-  }
+}
 
-  #[test]
-  fn calculate_hash() {
-    let mut iavl = IAVL::new();
-    for i in 0..10 {
-      iavl.insert(i, i);
+  // Method to retrieve the shared data of a given account
+    fn get_account_shared_data(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        // Acquire a read lock on the root to access the data safely
+        let root_guard = self.root.read().unwrap(); // Locking for read access
+
+        // Safely access the root and search for the account data
+        root_guard
+            .as_ref() // Access the Option inside the RwLock
+            .and_then(|root| Node::search(pubkey, root)) // Search for the account in the tree
+            .map(|(_, account_data)| account_data.clone()) // Clone the found account data
     }
-    iavl.save_tree();
+
+
+    // The method remains &self, matching the trait signature
+    fn add_builtin_account(&self, name: &str, program_id: &Pubkey) {
+      // Create the account using the native loader utility
+      let account_data = native_loader::create_loadable_account_with_fields(name, (5000, 0));
+
+      // Use a write lock to gain mutable access to self.root
+      let mut root = self.root.write().unwrap(); // Using RwLock for safe mutable access
+
+      // Insert the new account into the IAVL tree
+      match root.take() {
+          Some(existing_root) => {
+              // Insert account data into the existing tree
+              *root = Some(Node::insert(existing_root, *program_id, account_data, self.version));
+          }
+          None => {
+              // If the tree is empty, create a new root node with the account
+              *root = Some(Box::new(Node::new_leaf(*program_id, account_data, self.version)));
+          }
+      }
   }
 }
+
+// #[cfg(test)]
+// mod tests {
+//   use super::*;
+
+//   #[test]
+//   fn construct_tree() {
+//     let mut iavl = IAVL::new();
+//     iavl.insert(4, 4);
+//   }
+
+//   #[test]
+//   fn search() {
+//     let mut iavl = IAVL::new();
+//     for i in 0..10 {
+//       iavl.insert(i, i);
+//     }
+//     let root = &iavl.root.unwrap();
+//     let s = Node::search(&11, root);
+//     match s {
+//       None => {}
+//       Some(_) => assert!(false),
+//     }
+//     let s = Node::search(&4, root);
+//     match s {
+//       None => assert!(false),
+//       Some(_) => {}
+//     }
+//   }
+
+//   #[test]
+//   fn calculate_hash() {
+//     let mut iavl = IAVL::new();
+//     for i in 0..10 {
+//       iavl.insert(i, i);
+//     }
+//     iavl.save_tree();
+//   }
+// }

@@ -52,7 +52,7 @@ impl ForkGraph for MockForkGraph {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MockBankCallback {
     pub feature_set: Arc<FeatureSet>,
     pub account_shared_data: Arc<RwLock<HashMap<Pubkey, AccountSharedData>>>,
