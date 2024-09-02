@@ -474,42 +474,47 @@ use {
 	}
   }
   
-  // #[cfg(test)]
-  // mod tests {
-  //   use super::*;
+  #[cfg(test)]
+  mod tests {
+    use super::*;
   
-  //   #[test]
-  //   fn construct_tree() {
-  //     let mut iavl = IAVL::new();
-  //     iavl.insert(4, 4);
-  //   }
+    #[test]
+    fn construct_tree() {
+      let mut iavl = IAVL::new();
+      iavl.insert(4, 4);
+    }
   
-  //   #[test]
-  //   fn search() {
-  //     let mut iavl = IAVL::new();
-  //     for i in 0..10 {
-  //       iavl.insert(i, i);
-  //     }
-  //     let root = &iavl.root.unwrap();
-  //     let s = Node::search(&11, root);
-  //     match s {
-  //       None => {}
-  //       Some(_) => assert!(false),
-  //     }
-  //     let s = Node::search(&4, root);
-  //     match s {
-  //       None => assert!(false),
-  //       Some(_) => {}
-  //     }
-  //   }
+    #[test]
+    fn search() {
+      let mut iavl = IAVL::new();
+      for i in 0..10 {
+        iavl.insert(i, i);
+      }
+      let root = iavl.root.read().unwrap();
+	  match root.as_ref() {
+		Some(existing_root) => {
+            let s = Node::search(&11, existing_root);
+			match s {
+				None => {}
+				Some(_) => assert!(false),
+			}
+      		let s = Node::search(&4, existing_root);
+			match s {
+				None => assert!(false),
+				Some(_) => {}
+			}
+        }
+        None => {}
+	  } 
+    }
   
-  //   #[test]
-  //   fn calculate_hash() {
-  //     let mut iavl = IAVL::new();
-  //     for i in 0..10 {
-  //       iavl.insert(i, i);
-  //     }
-  //     iavl.save_tree();
-  //   }
-  // }
+    #[test]
+    fn calculate_hash() {
+      let mut iavl = IAVL::new();
+      for i in 0..10 {
+        iavl.insert(i, i);
+      }
+      iavl.save_tree();
+    }
+  }
   
