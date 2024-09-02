@@ -17,6 +17,7 @@ pub mod transaction_execution_result;
 pub mod transaction_processing_callback;
 pub mod transaction_processing_result;
 pub mod transaction_processor;
+pub mod iavl;
 
 #[macro_use]
 extern crate solana_metrics;
