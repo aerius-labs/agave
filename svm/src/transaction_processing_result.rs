@@ -19,7 +19,7 @@ pub trait TransactionProcessingResultExtensions {
     fn flattened_result(&self) -> TransactionResult<()>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProcessedTransaction {
     /// Transaction was executed, but if execution failed, all account state changes
     /// will be rolled back except deducted fees and any advanced nonces

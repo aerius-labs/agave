@@ -1,17 +1,13 @@
 use {
-	crate::transaction_processing_callback::TransactionProcessingCallback,
-	std::cmp,
-	std::sync::{Arc, RwLock},
-	crypto::{
+	crate::{
+		transaction_processing_callback::TransactionProcessingCallback, transaction_processing_result::{ProcessedTransaction, TransactionProcessingResult}
+	}, crypto::{
 	  digest::Digest,
 	  sha3::Sha3,
-	},
-	solana_sdk::{
-	  account::{AccountSharedData, ReadableAccount},
-	  pubkey::Pubkey,
-	  native_loader,
-  },
-  };
+	}, solana_sdk::{
+	  account::{AccountSharedData, ReadableAccount}, native_loader, pubkey::Pubkey
+  }, std::{cmp, sync::{Arc, RwLock}}
+};
   
   #[derive(Clone, Debug)]
   pub enum Node<K, V> {
@@ -40,13 +36,57 @@ use {
   impl<K, V> Default for IAVL<K, V> {
     fn default() -> Self {
         IAVL {
-            root: Arc::new(RwLock::new(None)), // Initialize the root with RwLock and None
-            version: 0, // Set the version to 0
+            root: Arc::new(RwLock::new(None)),
+            version: 0,
         }
     }
 }
+
+impl IAVL<Pubkey, AccountSharedData> {
+    // Method to update or insert a list of AccountSharedData structs
+    pub fn update_from_result(&mut self, results: Vec<TransactionProcessingResult>)
+   {
+		for result in results {
+			match result {
+				Ok(processed_transaction) => {
+					match processed_transaction {
+						ProcessedTransaction::Executed(executed_tx) => {
+							for (account_key, account) in executed_tx.loaded_transaction.accounts {   
+								self.update(account_key, account);         
+							}
+						},
+						ProcessedTransaction::FeesOnly(_) => {}
+						}
+					}
+				Err(_) => {}
+			}
+		}
+       
+    }
+
+	fn update(&mut self, account_key: Pubkey, account: AccountSharedData) {
+		let mut root_guard = self.root.write().unwrap();
+
+		match root_guard.take() {
+			None => {
+				*root_guard = Some(Box::new(Node::new_leaf(account_key, account, self.version)));
+			}
+			Some(root) => {
+				if let Some((_, existing_account)) = Node::search(&account_key, &root) {
+					if existing_account != &account {
+						*root_guard = Some(Node::insert(root, account_key, account, self.version));
+					} else {
+						*root_guard = Some(root);
+					}
+				} else {
+					*root_guard = Some(Node::insert(root, account_key, account, self.version));
+				}
+			}
+		}
+	}
+}
   
-  impl<K, V> Node<K, V> {
+  impl<'a, K: Ord, V> Node<K, V> {
 	pub fn print(&self)
 	where
 	  K: std::fmt::Display,
@@ -345,36 +385,34 @@ use {
 		_ => unreachable!(),
 	  }
 	}
-  }
-  
-  impl<'a, K: Ord, V> Node<K, V> {
+
 	pub fn search(search_key: &K, root: &'a Box<Node<K, V>>) -> Option<(&'a K, &'a V)> {
-	  match root.as_ref() {
-		Node::Leaf { key, value, .. } => {
-		  if key == search_key {
-			Some((&key, &value))
-		  } else {
-			None
+		match root.as_ref() {
+		  Node::Leaf { key, value, .. } => {
+			if key == search_key {
+			  Some((&key, &value))
+			} else {
+			  None
+			}
 		  }
-		}
-		Node::Inner {
-		  key, left, right, ..
-		} => {
-		  if search_key < key {
-			left
-			  .as_ref()
-			  .map_or(None, |node| Node::search(search_key, node))
-		  } else {
-			right
-			  .as_ref()
-			  .map_or(None, |node| Node::search(search_key, node))
+		  Node::Inner {
+			key, left, right, ..
+		  } => {
+			if search_key < key {
+			  left
+				.as_ref()
+				.map_or(None, |node| Node::search(search_key, node))
+			} else {
+			  right
+				.as_ref()
+				.map_or(None, |node| Node::search(search_key, node))
+			}
 		  }
 		}
 	  }
-	}
   }
-  
-  impl<K, V> IAVL<K, V> {
+
+  impl<K: Ord, V> IAVL<K, V>{
 	// Creates a new IAVL tree with no root and version 0
 	pub fn new() -> Self {
 		IAVL {

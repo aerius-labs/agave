@@ -4,8 +4,7 @@ use {
     crate::iavl_mock_bank::{
         create_executable_environment, deploy_program, program_address, register_builtins, update_iavl_tree,
         MockBankCallback, MockForkGraph, WALLCLOCK_TIME,
-    },
-	solana_sdk::{
+    }, rand::rngs::mock, solana_sdk::{
         account::{AccountSharedData, WritableAccount},
         clock::Slot,
         hash::Hash,
@@ -18,15 +17,16 @@ use {
         transaction::{SanitizedTransaction, Transaction, TransactionError},
         transaction_context::TransactionReturnData,
     }, solana_svm::{
-        account_loader::{CheckedTransactionDetails, TransactionCheckResult}, transaction_execution_result::TransactionExecutionDetails, transaction_processing_result::ProcessedTransaction, transaction_processor::{
+        account_loader::{CheckedTransactionDetails, TransactionCheckResult}, iavl::{Node}, transaction_execution_result::TransactionExecutionDetails, transaction_processing_result::ProcessedTransaction, transaction_processor::{
             ExecutionRecordingConfig, TransactionBatchProcessor, TransactionProcessingConfig,
             TransactionProcessingEnvironment,
         }
-    }, solana_type_overrides::sync::{Arc, RwLock}, std::collections::{HashMap, HashSet}, test_case::test_case
+    }, solana_type_overrides::sync::{Arc, RwLock}, std::{collections::{HashMap, HashSet}, rc::Rc}, test_case::test_case
 };
 
 // This module contains the implementation of TransactionProcessingCallback
 mod iavl_mock_bank;
+// mod graphviz;
 
 const DEPLOYMENT_SLOT: u64 = 0;
 const EXECUTION_SLOT: u64 = 5; // The execution slot must be greater than the deployment slot
@@ -555,7 +555,6 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
     }
 
     for (pubkey, account) in &test_entry.initial_accounts {
-        println!("BEFORE: {} : {:?}", pubkey, account);
         let mut root = mock_bank.iavl.root.write().unwrap(); // Using RwLock for safe mutable access
         update_iavl_tree(&mut root, *pubkey, account.clone(), 1);
     }
@@ -597,10 +596,19 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
         &processing_config,
     );
 
+    let bo = Rc::new(batch_output);
+    let pr = Rc::new(&bo.processing_results);
+
+    for processing_result in pr.to_vec() {
+        println!("-----------");
+        println!("PROCESSING RESULTS: {:?}", processing_result);
+        println!("-----------");
+    }
+
     // build a hashmap of final account states incrementally, starting with all initial states, updating to all final states
     // NOTE with SIMD-83 an account may appear multiple times in the same batch
     let mut final_accounts_actual = test_entry.initial_accounts.clone();
-    for processed_transaction in batch_output
+    for processed_transaction in Rc::clone(&bo)
         .processing_results
         .iter()
         .filter_map(|r| r.as_ref().ok())
@@ -636,7 +644,7 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
     }
 
     // now run our transaction-by-transaction checks
-    for (processing_result, test_item_asserts) in batch_output
+    for (processing_result, test_item_asserts) in Rc::clone(&bo)
         .processing_results
         .iter()
         .zip(test_entry.asserts())
@@ -647,5 +655,24 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
             Ok(ProcessedTransaction::FeesOnly(_)) => unreachable!(),
             Err(_) => assert!(!test_item_asserts.executed),
         }
+    }
+
+    let bb = Rc::new(&bo.processing_results);
+    mock_bank.iavl.update_from_result(bb.to_vec());
+
+    // check that all the account states we care about in IAVL
+    let root_guard = mock_bank.iavl.root.read().unwrap();
+    for (pubkey, expected_account_data) in test_entry.final_accounts.iter() {
+        let actual_account_data = Node::search(pubkey, root_guard.as_ref().unwrap());
+        println!("-----------");
+        println!("EXPECTED: {} : {:?}", pubkey, expected_account_data);
+        println!("ACTUAL IN IAVL: {} : {:?}", pubkey, actual_account_data);
+        println!("-----------");
+        assert_eq!(
+            Some(expected_account_data),
+            Some(actual_account_data.unwrap().1),
+            "mismatch on account {}",
+            pubkey
+        );
     }
 }
