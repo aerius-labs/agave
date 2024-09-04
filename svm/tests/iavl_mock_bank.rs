@@ -25,7 +25,7 @@ use {
     solana_svm::{
         // transaction_processing_callback::TransactionProcessingCallback,
         transaction_processor::TransactionBatchProcessor,
-        iavl::{IAVL, Node},
+        iavl::IAVL,
     },
     solana_type_overrides::sync::{Arc, RwLock},
     std::{
@@ -85,7 +85,6 @@ pub fn deploy_program(name: String, deployment_slot: Slot, mock_bank: &MockBankC
     let state = UpgradeableLoaderState::Program {
         programdata_address: program_data_account,
     };
-	let mut root = mock_bank.iavl.root.write().unwrap(); // Using RwLock for safe mutable access
 
     // The program account must have funds and hold the executable binary
     let mut account_data = AccountSharedData::default();
@@ -93,7 +92,7 @@ pub fn deploy_program(name: String, deployment_slot: Slot, mock_bank: &MockBankC
     account_data.set_lamports(25);
     account_data.set_owner(bpf_loader_upgradeable::id());
     account_data.set_executable(true);
-    update_iavl_tree(&mut root, program_account, account_data, mock_bank.iavl.version);
+    mock_bank.iavl.update(program_account, account_data);
 
     let mut account_data = AccountSharedData::default();
     let state = UpgradeableLoaderState::ProgramData {
@@ -113,7 +112,7 @@ pub fn deploy_program(name: String, deployment_slot: Slot, mock_bank: &MockBankC
     header.append(&mut buffer);
     account_data.set_data(header);
 
-    update_iavl_tree(&mut root, program_data_account, account_data, mock_bank.iavl.version);
+    mock_bank.iavl.update(program_data_account, account_data);
     program_account
 }
 
@@ -145,11 +144,10 @@ pub fn create_executable_environment(
         leader_schedule_epoch: DEPLOYMENT_EPOCH,
         unix_timestamp: WALLCLOCK_TIME as UnixTimestamp,
     };
-	let mut root = mock_bank.iavl.root.write().unwrap(); // Using RwLock for safe mutable access
 
     let mut account_data = AccountSharedData::default();
     account_data.set_data(bincode::serialize(&clock).unwrap());
-    update_iavl_tree(&mut root, Clock::id(), account_data, mock_bank.iavl.version);
+    mock_bank.iavl.update(Clock::id(), account_data)
 }
 
 #[allow(unused)]
@@ -185,24 +183,6 @@ pub fn register_builtins(
             solana_system_program::system_processor::Entrypoint::vm,
         ),
     );
-}
-
-pub fn update_iavl_tree(
-    root: &mut Option<Box<Node<Pubkey, AccountSharedData>>>,
-    account_key: Pubkey,
-    account_data: AccountSharedData,
-    version: u32,
-) {
-    match root.take() {
-        Some(existing_root) => {
-            // Insert account data into the existing tree
-            *root = Some(Node::insert(existing_root, account_key, account_data, version));
-        }
-        None => {
-            // If the tree is empty, create a new root node with the account
-            *root = Some(Box::new(Node::new_leaf(account_key, account_data, 1)));
-        }
-    }
 }
 
 #[allow(unused)]

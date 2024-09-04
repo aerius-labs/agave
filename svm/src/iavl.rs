@@ -64,7 +64,7 @@ impl IAVL<Pubkey, AccountSharedData> {
        
     }
 
-	fn update(&mut self, account_key: Pubkey, account: AccountSharedData) {
+	pub fn update(&self, account_key: Pubkey, account: AccountSharedData) {
 		let mut root_guard = self.root.write().unwrap();
 
 		match root_guard.take() {

@@ -2,9 +2,9 @@
 
 use {
     crate::iavl_mock_bank::{
-        create_executable_environment, deploy_program, program_address, register_builtins, update_iavl_tree,
+        create_executable_environment, deploy_program, program_address, register_builtins,
         MockBankCallback, MockForkGraph, WALLCLOCK_TIME,
-    }, rand::rngs::mock, solana_sdk::{
+    }, solana_sdk::{
         account::{AccountSharedData, WritableAccount},
         clock::Slot,
         hash::Hash,
@@ -17,7 +17,7 @@ use {
         transaction::{SanitizedTransaction, Transaction, TransactionError},
         transaction_context::TransactionReturnData,
     }, solana_svm::{
-        account_loader::{CheckedTransactionDetails, TransactionCheckResult}, iavl::{Node}, transaction_execution_result::TransactionExecutionDetails, transaction_processing_result::ProcessedTransaction, transaction_processor::{
+        account_loader::{CheckedTransactionDetails, TransactionCheckResult}, iavl::Node, transaction_execution_result::TransactionExecutionDetails, transaction_processing_result::ProcessedTransaction, transaction_processor::{
             ExecutionRecordingConfig, TransactionBatchProcessor, TransactionProcessingConfig,
             TransactionProcessingEnvironment,
         }
@@ -555,8 +555,7 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
     }
 
     for (pubkey, account) in &test_entry.initial_accounts {
-        let mut root = mock_bank.iavl.root.write().unwrap(); // Using RwLock for safe mutable access
-        update_iavl_tree(&mut root, *pubkey, account.clone(), 1);
+        mock_bank.iavl.update(*pubkey, account.clone())
     }
 
     let batch_processor = TransactionBatchProcessor::<MockForkGraph>::new(
@@ -657,9 +656,7 @@ fn execute_test_entry(test_entry: SvmTestEntry) {
         }
     }
 
-    let bb = Rc::new(&bo.processing_results);
-    mock_bank.iavl.update_from_result(bb.to_vec());
-
+    mock_bank.iavl.update_from_result(pr.to_vec());
     // check that all the account states we care about in IAVL
     let root_guard = mock_bank.iavl.root.read().unwrap();
     for (pubkey, expected_account_data) in test_entry.final_accounts.iter() {
